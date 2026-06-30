@@ -1,0 +1,60 @@
+#include<unistd.h> // library for reading directly from the terminal
+#include<termios.h> // for exploiting the terminal
+#include<stdlib.h> // for atexit fucntion used to restore terminal back to its original settings
+#include<ctype.h> // to chech whether char is ascii printable or not
+#include<stdio.h> // printf
+#include <errno.h> // for error calling
+
+struct termios orig; // custom struct to handle the terminal modes raw and cooked
+
+void die(const char * s){
+    perror(s);
+    exit(1);
+}
+void disableraw(){
+    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig)==-1){
+        die("tcsetattr");
+    }
+}
+void enablerawmode(){ // function to enable rawmode in terminal
+    
+    // terminal attributes written by tcgetchar and modified using tcsetchar
+    if (tcgetattr(STDIN_FILENO, &orig) == -1) die("tcgetattr"); 
+
+    atexit(disableraw); // to restore the terminal settings back to cooked mode
+    struct termios raw = orig;
+
+    raw.c_iflag &= ~(IXON | ICRNL); // ixon is used to kill ctrl s and ctrl q since they are for software flow control
+    // icrnl is for fixing the cntrl m issue typecast fo enter from 13 to 10 and lauda lasan
+    // pressing ctrl s stops the terminal from reading out input
+    raw.c_iflag &= ~(BRKINT | INPCK | ISTRIP);// legacy
+    raw.c_lflag &= ~(ECHO|ICANON | ISIG | IEXTEN);  
+    // flips the bit to 0, icanon for turning off canonical mode and isig to diable ctrl c and ctrl z, iexten for ctrl v
+    raw.c_cflag |= (CS8); //again legacy
+    raw.c_oflag &= ~(OPOST); //OPOST is post-processing of output” turns off all output processing 
+
+    // time the inputs
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1; // time in 1/10th os second before which it will wait to kill the code
+    
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
+}
+
+int main(){
+
+    enablerawmode(); // even if we type in the terminal nothing reflects due to this function
+
+    char c;
+    while(1){ //STDIN_FILENO macro that evaluates to 0. & is used for address of char c, 1 is num of char
+        char c = '\0';
+        if (read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read"); // error call for not read
+        if(iscntrl(c)){ // iscntrl() tests whether a character is a control character.
+            printf("%d\r\n",c);
+        }
+        else{
+            printf("%d ('%c')\r\n",c,c);
+        }
+        if(c=='q') break;
+    } 
+    return 0;
+}
